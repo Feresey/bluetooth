@@ -6,3 +6,6 @@ bin:
 
 clean:
 	rm -v ./bin/*
+
+install:
+	go install -v ./cmd/...
