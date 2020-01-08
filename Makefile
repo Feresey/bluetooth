@@ -9,3 +9,6 @@ clean:
 
 install:
 	go install -v ./cmd/...
+
+test:
+	go test -v ./util/...

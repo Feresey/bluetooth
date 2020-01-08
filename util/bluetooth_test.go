@@ -1,4 +1,4 @@
-package  util
+package util
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ func TestCmd(t *testing.T) {
 	buffer := bytes.NewBuffer(nil)
 	c := &Cmd{
 		executable: "echo",
+		mac:        "MAC",
 		sudo:       "echo",
 		output:     buffer,
 	}
@@ -24,7 +25,7 @@ func TestCmd(t *testing.T) {
 			name:           "connect",
 			MAC:            "MAC",
 			expectedOutput: []byte("connect MAC\n"),
-			method:         func() error { return c.Connect("MAC") },
+			method:         c.Connect,
 		},
 		{
 			name:           "disconnect",
@@ -49,7 +50,7 @@ func TestCmd(t *testing.T) {
 	}
 
 	t.Run("new", func(t *testing.T) {
-		if !reflect.DeepEqual(NewCmd(nil), &Cmd{executable: "bluetoothctl", sudo: "sudo", output: os.Stdout}) {
+		if !reflect.DeepEqual(NewCmd(nil, ""), &Cmd{executable: "bluetoothctl", sudo: "sudo", output: os.Stdout}) {
 			t.Errorf("Struct does not match")
 		}
 	})

@@ -1,4 +1,4 @@
-package  util
+package util
 
 import (
 	"io"
@@ -8,16 +8,18 @@ import (
 
 type Cmd struct {
 	executable string
+	mac        string
 	sudo       string
 	output     io.Writer
 }
 
-func NewCmd(out io.Writer) *Cmd {
+func NewCmd(out io.Writer, MAC string) *Cmd {
 	if out == nil {
 		out = os.Stdout
 	}
 	return &Cmd{
 		executable: "bluetoothctl",
+		mac:        MAC,
 		sudo:       "sudo",
 		output:     out,
 	}
@@ -26,11 +28,12 @@ func NewCmd(out io.Writer) *Cmd {
 func (c *Cmd) run(args ...string) error {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = c.output
+	cmd.Stderr = c.output
 	return cmd.Run()
 }
 
-func (c *Cmd) Connect(MAC string) error {
-	return c.run(c.executable, "connect", MAC)
+func (c *Cmd) Connect() error {
+	return c.run(c.executable, "connect", c.mac)
 }
 
 func (c *Cmd) Disconnect() error {
