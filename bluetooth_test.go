@@ -1,4 +1,4 @@
-package util
+package main
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 
 func TestCmd(t *testing.T) {
 	buffer := bytes.NewBuffer(nil)
+
 	c := &Cmd{
 		executable: "echo",
 		mac:        "MAC",
@@ -50,7 +51,7 @@ func TestCmd(t *testing.T) {
 	}
 
 	t.Run("new", func(t *testing.T) {
-		if !reflect.DeepEqual(NewCmd(nil, ""), &Cmd{executable: "bluetoothctl", sudo: "sudo", output: os.Stdout}) {
+		if !reflect.DeepEqual(newCmd(nil, ""), &Cmd{executable: "bluetoothctl", sudo: "sudo", output: os.Stdout}) {
 			t.Errorf("Struct does not match")
 		}
 	})

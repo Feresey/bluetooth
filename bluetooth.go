@@ -1,4 +1,4 @@
-package util
+package main
 
 import (
 	"io"
@@ -13,14 +13,14 @@ type Cmd struct {
 	output     io.Writer
 }
 
-func NewCmd(out io.Writer, MAC string) *Cmd {
+func newCmd(out io.Writer, MAC string) *Cmd {
 	if out == nil {
 		out = os.Stdout
 	}
 	return &Cmd{
 		executable: "bluetoothctl",
 		mac:        MAC,
-		sudo:       "sudo",
+		sudo:       "xfsudo",
 		output:     out,
 	}
 }
