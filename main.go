@@ -26,6 +26,8 @@ type cmd struct {
 	sudo       string
 	MAC        string
 	Quiet      bool
+
+	wg sync.WaitGroup
 }
 
 func newCmd() *cmd {
@@ -65,6 +67,7 @@ func main() {
 	go func() {
 		gracefullShutdown()
 		cancel()
+		command.wg.Wait()
 	}()
 
 	for _, elem := range flag.Args()[0] {
@@ -82,7 +85,7 @@ func main() {
 			must(command.Remove())
 
 			must(command.Scan(ctx, 3*time.Second))
-			must(command.Pair(ctx, cancel, time.Second))
+			must(command.Pair(ctx, time.Second))
 			must(command.Connect())
 		default:
 			log.Printf("No such command: %v", elem)
@@ -131,7 +134,12 @@ func (c *cmd) execHere(command string, args ...string) *exec.Cmd {
 }
 
 func (c *cmd) Scan(ctx context.Context, active time.Duration) (info string, err error) {
-	go c.scan(ctx, active)
+	c.wg.Add(1)
+
+	go func() {
+		c.scan(ctx, active)
+		c.wg.Done()
+	}()
 
 	return "Scan avaliable devices", nil
 }
@@ -143,7 +151,9 @@ func (c *cmd) scan(ctx context.Context, active time.Duration) {
 			return
 		default:
 			if c.scanByInterval(active) {
-				log.Info("Device found")
+				if !c.Quiet {
+					log.Info("Device found")
+				}
 				return
 			}
 		}
@@ -179,7 +189,7 @@ func (c *cmd) scanByInterval(active time.Duration) bool {
 	return false
 }
 
-func (c *cmd) Pair(ctx context.Context, cancelScan func(), sleep time.Duration) (info string, err error) {
+func (c *cmd) Pair(ctx context.Context, sleep time.Duration) (info string, err error) {
 	info = "Pair with specified device"
 
 loop:
@@ -197,8 +207,6 @@ loop:
 			}
 		}
 	}
-
-	cancelScan()
 
 	return
 }
