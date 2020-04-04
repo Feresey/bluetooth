@@ -6,36 +6,43 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
-type Cmd struct {
-	executable string
-	mac        string
-	sudo       string
+var mu sync.Mutex
+
+type cmd struct {
+	execCommand        func(name string, args ...string) *exec.Cmd
+	execCommandContext func(ctx context.Context, name string, args ...string) *exec.Cmd
+	executable         string
+	mac                string
+	sudo               string
 }
 
-func newCmd(mac string) *Cmd {
-	return &Cmd{
-		executable: "bluetoothctl",
-		mac:        mac,
-		sudo:       "xfsudo",
+func newCmd(mac string) *cmd {
+	return &cmd{
+		execCommand:        exec.Command,
+		execCommandContext: exec.CommandContext,
+		executable:         "bluetoothctl",
+		mac:                mac,
+		sudo:               "xfsudo",
 	}
 }
 
 func main() {
 	flag.Usage = func() {
 		fmt.Println(`This program parse first argument by characters:
-		"r": restart bluetooth daemon and reconnect speifier device
-		"c": connect to the MAC
-		"d": disconnect
-		"+": power on bluetooth
-		"-": power off bluetooth`)
+		"r": restart bluetooth daemon
+		"+": connect to the MAC
+		"-": disconnect from the MAC
+		"d": remove device and connect cleanly`)
 	}
 
 	var mac string
@@ -50,24 +57,31 @@ func main() {
 
 	command := newCmd(mac)
 
-	go gracefullShutdown()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		gracefullShutdown()
+		cancel()
+	}()
 
 	for _, elem := range flag.Args()[0] {
 		switch elem {
 		case '+':
-			must(command.on())
-			must(command.connect())
+			must(command.On())
+			must(command.Connect())
 		case '-':
-			must(command.disconnect())
-			must(command.off())
+			must(command.Disconnect())
+			must(command.Off())
 		case 'r':
-			must(command.restart())
-		case 'd':
-			must(command.on())
-			must(command.remove())
-			must(command.scan())
-			must(command.pair())
-			must(command.connect())
+			must(command.Restart())
+		case 'c':
+			must(command.On())
+			must(command.Remove())
+
+			must(command.Scan(ctx, 3*time.Second))
+			must(command.Pair(ctx, cancel, time.Second))
+			must(command.Connect())
 		default:
 			log.Printf("No such command: %v", elem)
 		}
@@ -81,22 +95,29 @@ func gracefullShutdown() {
 	fmt.Println("Caught interrupt signal, stopping all processes")
 }
 
-func must(info string, err error) {
+func must(info string, err error) (ok bool) {
 	msg := new(strings.Builder)
 
 	msg.WriteString(info)
 	msg.WriteString("...\t: ")
 
+	mu.Lock()
 	if err != nil {
+		log.SetLevel(log.ErrorLevel)
 		msg.WriteString(err.Error())
+		ok = false
 	} else {
+		log.SetLevel(log.InfoLevel)
 		msg.WriteString("SUCCESS")
+		ok = true
 	}
+	mu.Unlock()
 
-	fmt.Println(msg.String())
+	log.Print(msg.String())
+	return
 }
 
-func execHere(command string, args ...string) *exec.Cmd {
+func (c *cmd) execHere(command string, args ...string) *exec.Cmd {
 	res := exec.Command(command, args...)
 
 	res.Stdout = os.Stdout
@@ -105,74 +126,100 @@ func execHere(command string, args ...string) *exec.Cmd {
 	return res
 }
 
-func (c *Cmd) connect() (info string, err error) {
-	return "Connect to specified device",
-		execHere(c.executable, "connect", c.mac).Run()
+func (c *cmd) Scan(ctx context.Context, active time.Duration) (info string, err error) {
+	go c.scan(ctx, active)
+
+	return "Scan avaliable devices", nil
 }
 
-func (c *Cmd) disconnect() (info string, err error) {
-	return "Disconnect specified device",
-		execHere(c.executable, "disconnect").Run()
+func (c *cmd) scan(ctx context.Context, active time.Duration) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if c.scanByInterval(active) {
+				log.Info("Device found")
+				return
+			}
+		}
+	}
 }
 
-func (c *Cmd) on() (info string, err error) {
-	return "Power on bluetooth adapter",
-		execHere(c.executable, "power", "on").Run()
-}
-
-func (c *Cmd) off() (info string, err error) {
-	return "Power off bluetooth adapter",
-		execHere(c.executable, "power", "off").Run()
-}
-
-func (c *Cmd) restart() (info string, err error) {
-	return "Restart bluetooth service",
-		execHere(c.sudo, "systemctl", "restart", "bluetooth").Run()
-}
-
-func (c *Cmd) remove() (info string, err error) {
-	return "Remove specified device",
-		execHere(c.executable, "remove", c.mac).Run()
-}
-
-func (c *Cmd) scan() (info string, err error) {
-	info = "Scan avaliable devices"
-
+func (c *cmd) scanByInterval(active time.Duration) bool {
 	var (
-		ctx, cancel = context.WithCancel(context.Background())
-		cmd         = exec.CommandContext(ctx, c.executable, "scan", "on")
+		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(active))
+		cmd         = c.execCommandContext(ctx, c.executable, "scan", "on")
 		waitFor     = fmt.Sprintf(`[NEW] Device %s`, c.mac)
 	)
+	defer cancel()
 
-	stop := func() {
-		cancel()
-		must("Cancelling scan", cmd.Wait())
-	}
+	// ошибка будет всегда, т.к. я убиваю нахер процесс
+	out, _ := cmd.Output()
 
-	go func() {
-		time.Sleep(5 * time.Second)
-		stop()
-	}()
-	err = cmd.Start()
-
-	out, er := cmd.Output()
-	if er != nil {
-		err = er
-		return
-	}
+	fmt.Print(string(out))
 
 	s := bufio.NewScanner(bytes.NewReader(out))
 
 	for s.Scan() {
 		if strings.HasPrefix(s.Text(), waitFor) {
-			return
+			return true
 		}
 	}
+
+	return false
+}
+
+func (c *cmd) Pair(ctx context.Context, cancelScan func(), sleep time.Duration) (info string, err error) {
+	info = "Pair with specified device"
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			err = c.execHere(c.executable, "pair", c.mac).Run()
+			must(info, err)
+			if err == nil {
+				break loop
+			} else {
+				time.Sleep(sleep)
+			}
+		}
+	}
+
+	cancelScan()
 
 	return
 }
 
-func (c *Cmd) pair() (info string, err error) {
-	return "Pair with specified device",
-		execHere(c.executable, "pair", c.mac).Run()
+func (c *cmd) Connect() (info string, err error) {
+	return "Connect to specified device",
+		c.execHere(c.executable, "connect", c.mac).Run()
+}
+
+func (c *cmd) Disconnect() (info string, err error) {
+	return "Disconnect specified device",
+		c.execHere(c.executable, "disconnect").Run()
+}
+
+func (c *cmd) On() (info string, err error) {
+	return "Power on bluetooth adapter",
+		c.execHere(c.executable, "power", "on").Run()
+}
+
+func (c *cmd) Off() (info string, err error) {
+	return "Power off bluetooth adapter",
+		c.execHere(c.executable, "power", "off").Run()
+}
+
+func (c *cmd) Restart() (info string, err error) {
+	return "Restart bluetooth service",
+		c.execHere(c.sudo, "systemctl", "restart", "bluetooth").Run()
+}
+
+func (c *cmd) Remove() (info string, err error) {
+	return "Remove specified device",
+		c.execHere(c.executable, "remove", c.mac).Run()
 }
