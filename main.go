@@ -48,7 +48,7 @@ func main() {
 		"r": restart bluetooth daemon
 		"+": connect to the MAC
 		"-": disconnect from the MAC
-		"d": remove device and connect cleanly`)
+		"c": remove device and connect cleanly`)
 	}
 
 	flag.StringVar(&command.MAC, "mac", "5C:FB:7C:77:23:E2", "Address of bluetooth device")
@@ -61,7 +61,7 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(3*time.Minute))
 	defer cancel()
 
 	go func() {
