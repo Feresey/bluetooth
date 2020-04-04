@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"testing"
 	"time"
@@ -11,23 +10,27 @@ import (
 )
 
 const (
-	testingMAC  = "00:11:22:33:44:55:66"
-	sleep       = 10 * time.Millisecond
-	scanCommand = "bluetoothctl scan on"
+	testingMAC     = "00:11:22:33:44:55:66"
+	sleep          = 10 * time.Millisecond
+	scanCommand    = "bluetoothctl scan on"
+	deviceFound    = "[NEW] Device " + testingMAC
+	deviceNotFound = "[NOT NEW] Device"
 )
 
-func debugCmd(c *cmd) *cmd {
+func debugCmd(c *cmd, mac string) *cmd {
 	c.execCommand = helperCommand
 	c.execCommandContext = helperCommandContext
+	c.MAC = mac
+	c.Quiet = true
 	return c
 }
 
 func TestCmdScanByInterval(t *testing.T) {
-	c := debugCmd(newCmd(testingMAC))
+	c := debugCmd(newCmd(), testingMAC)
 
 	t.Run("on first hit", func(t *testing.T) {
 		result[scanCommand] = &trapExec{
-			text: fmt.Sprintf(`[NEW] Device %s`, testingMAC),
+			text: deviceFound,
 		}
 
 		ok := c.scanByInterval(sleep)
@@ -35,20 +38,19 @@ func TestCmdScanByInterval(t *testing.T) {
 	})
 
 	t.Run("on ten hit", func(t *testing.T) {
-		result[scanCommand] = &trapExec{
-			text: `[NOT NEW] Device`,
+		fake := &trapExec{
+			text: deviceNotFound,
 		}
+		result[scanCommand] = fake
 
 		for i := 0; i < 10; i++ {
 			ok := c.scanByInterval(sleep)
 			assert.Equal(t, ok, false)
 		}
 
-		assert.Equal(t, 10, result[scanCommand].called)
+		assert.Equal(t, 10, fake.called)
 
-		result[scanCommand] = &trapExec{
-			text: fmt.Sprintf(`[NEW] Device %s`, testingMAC),
-		}
+		fake.text = deviceFound
 
 		ok := c.scanByInterval(sleep)
 		assert.Equal(t, ok, true)
@@ -56,11 +58,11 @@ func TestCmdScanByInterval(t *testing.T) {
 }
 
 func TestCmdScan(t *testing.T) {
-	c := debugCmd(newCmd(testingMAC))
+	c := debugCmd(newCmd(), testingMAC)
 
 	t.Run("on first hit", func(t *testing.T) {
 		result[scanCommand] = &trapExec{
-			text: fmt.Sprintf(`[NEW] Device %s`, testingMAC),
+			text: deviceFound,
 		}
 
 		var (
@@ -82,9 +84,10 @@ func TestCmdScan(t *testing.T) {
 	})
 
 	t.Run("on tenth hit", func(t *testing.T) {
-		result[scanCommand] = &trapExec{
-			text: fmt.Sprintf(`[NEW] Device %s`, testingMAC),
+		fake := &trapExec{
+			text: deviceNotFound,
 		}
+		result[scanCommand] = fake
 
 		var (
 			ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Second))
@@ -95,6 +98,14 @@ func TestCmdScan(t *testing.T) {
 		go func() {
 			c.scan(context.TODO(), sleep)
 			done <- struct{}{}
+		}()
+
+		go func() {
+			for fake.called < 10 {
+				time.Sleep(sleep)
+			}
+
+			fake.text = deviceFound
 		}()
 
 		select {
@@ -131,7 +142,7 @@ func TestCmd_pair(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Pair(tt.args.ctx, tt.args.cancelScan, tt.args.sleep)
@@ -166,7 +177,7 @@ func TestCmd_connect(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Connect()
@@ -201,7 +212,7 @@ func TestCmd_disconnect(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Disconnect()
@@ -236,7 +247,7 @@ func TestCmd_on(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.On()
@@ -271,7 +282,7 @@ func TestCmd_off(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Off()
@@ -306,7 +317,7 @@ func TestCmd_restart(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Restart()
@@ -341,7 +352,7 @@ func TestCmd_remove(t *testing.T) {
 			c := &cmd{
 				execCommand: tt.fields.execCommand,
 				executable:  tt.fields.executable,
-				mac:         tt.fields.mac,
+				MAC:         tt.fields.mac,
 				sudo:        tt.fields.sudo,
 			}
 			gotInfo, err := c.Remove()
