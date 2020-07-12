@@ -80,6 +80,9 @@ func main() {
 			must(command.Off())
 		case 'r':
 			must(command.Restart())
+        case 's':
+			must(command.Scan(ctx, 3*time.Second))
+            time.Sleep(10*time.Second)
 		case 'c':
 			must(command.On())
 			must(command.Remove())
